@@ -10,6 +10,7 @@ int main() {
   send_md5(socket, content);
   wait_confirmation(socket);
   exit_gracefully(0);
+  close(socket);
 }
 
 void configure_logger() {
@@ -20,7 +21,7 @@ void configure_logger() {
         (info, warning y error!)
   */
 
-  logger = log_create("tp0.log", "tp0.c", 1 , LOG_LEVEL_INFO);
+  logger = log_create("tp0.log", "tp0", 1 , LOG_LEVEL_INFO);
 }
 
 int connect_to_server(char * ip, char * port) {
@@ -34,7 +35,7 @@ int connect_to_server(char * ip, char * port) {
   getaddrinfo(ip, port, &hints, &server_info);  // Carga en server_info los datos de la conexion
 
   // 2. Creemos el socket con el nombre "server_socket" usando la "server_info" que creamos anteriormente
-  int server_socket = socket(AF_UNSPEC, SOCK_STREAM, 0);
+  int server_socket = socket(server_info->ai_family, server_info->ai_socktype, server_info->ai_protocol);
   if(server_socket == -1)
   {
 	  log_error(logger, "No se pudo crear correctamente el socket");
@@ -214,10 +215,28 @@ void * wait_content(int socket) {
 
   log_info(logger, "Esperando el encabezado del contenido(%ld bytes)", sizeof(ContentHeader));
   // 13.1. Reservamos el suficiente espacio para guardar un ContentHeader
-  ContentHeader * header = { /* 8.1. */ };
+  ContentHeader * header = malloc(sizeof(ContentHeader));
 
   // 13.2. Recibamos el header en la estructura y chequiemos si el id es el correcto.
   //      No se olviden de validar los errores, liberando memoria y cerrando el socket!
+
+  int bytesRecibidos = recv(socket, header, sizeof(ContentHeader), MSG_WAITALL);
+
+  if(bytesRecibidos < 0)
+  {
+	  log_error(logger, "No se pudo recibir correctamente el header");
+      free(header);
+      close(socket);
+      exit_gracefully(1);
+  }
+
+  if(header->id != 18)
+  {
+	  log_error(logger, "No se pudo recibir correctamente el header");
+	  free(header);
+	  close(socket);
+      exit_gracefully(1);
+  }
 
   log_info(logger, "Esperando el contenido (%d bytes)", header->len);
 
@@ -228,10 +247,38 @@ void * wait_content(int socket) {
       14.2. Recibimos el contenido en un buffer (si hubo error, fallamos, liberamos y salimos
   */
 
+  void* buffer = malloc(header->len);
+  bytesRecibidos = recv(socket, buffer, sizeof(header->len), MSG_WAITALL);
+  if(bytesRecibidos < 0)
+    {
+  	  log_error(logger, "No se pudo recibir correctamente el mensaje");
+      free(header);
+      close(socket);
+      exit_gracefully(1);
+    }
+
+  free(header);
+
+  return buffer;
+
   /*
       15.   Finalmente, no te olvides de liberar la memoria que pedimos
             para el header y retornar el contenido recibido.
   */
+}
+
+char* hash_md5(char* input, size_t input_size) {
+	unsigned char digest[16];
+
+	MD5((unsigned char*) input, input_size, digest);
+
+	char md5_str[33];
+	int i;
+	for (i = 0; i < 16; i++) {
+		sprintf(&md5_str[i * 2], "%02x", (unsigned int) digest[i]);
+	}
+
+	return strdup(md5_str);
 }
 
 void send_md5(int socket, void * content) {
@@ -240,13 +287,7 @@ void send_md5(int socket, void * content) {
           a armar el digest:
   */
 
-  void * digest = malloc(MD5_DIGEST_LENGTH);
-  MD5_CTX context;
-  MD5_Init(&context);
-  MD5_Update(&context, content, strlen(content) + 1);
-  MD5_Final(digest, &context);
-
-  free(content);
+  char* md5 = hash_md5((char*)content, strlen((char*)content));
 
   /*
     17.   Luego, nos toca enviar a nosotros un contenido variable.
@@ -257,18 +298,27 @@ void send_md5(int socket, void * content) {
 
   //      17.1. Creamos un ContentHeader para guardar un mensaje de id 33 y el tamaño del md5
 
-  ContentHeader header = { /* 17.1. */ };
+  ContentHeader header;
+  header.id = 33;
+  header.len = strlen(md5);
 
   /*
           17.2. Creamos un buffer del tamaño del mensaje completo y copiamos el header y la info de "digest" allí.
           Recuerden revisar la función memcpy(ptr_destino, ptr_origen, tamaño)!
   */
 
+  void* buffer = malloc(sizeof(ContentHeader) + header.len);
+
+  memcpy(buffer, &header, sizeof(header));
+  memcpy(buffer + sizeof(header), md5, header.len);
+
   /*
     18.   Con todo listo, solo nos falta enviar el paquete que armamos y liberar la memoria que usamos.
           Si, TODA la que usamos, eso incluye a la del contenido del mensaje que recibimos en la función
           anterior y el digest del MD5. Obviamente, validando tambien los errores.
   */
+
+  send(socket, buffer,sizeof(header) + header.len, 0);
 }
 
 void wait_confirmation(int socket) {
@@ -277,8 +327,23 @@ void wait_confirmation(int socket) {
     19.   Ahora nos toca recibir la confirmacion del servidor.
           Si el resultado obvenido es distinto de 0, entonces hubo un error
   */
+  	int ret = recv(socket, &result, sizeof(result), MSG_WAITALL);
+  	if (ret == -1) {
+  		log_error(logger, "Error en el recv()\n");
+  	}
 
-  log_info(logger, "Los MD5 concidieron!");
+  	if (result == 1) {
+
+  		log_info(logger, "Los MD5 concidieron!");
+
+  	} else if (result == 0) {
+
+  		log_error(logger, "No coincidieron los MD5");
+
+  	} else {
+  		log_error(logger, "WTF");
+  	}
+
 }
 
 void exit_gracefully(int return_nr) {
@@ -291,5 +356,5 @@ void exit_gracefully(int return_nr) {
 	log_destroy(logger);
 	if(return_nr == 1) exit(EXIT_FAILURE);
 
-	exit();
+	exit(EXIT_SUCCESS);
 }

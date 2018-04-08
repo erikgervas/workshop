@@ -25,7 +25,7 @@
 #include <commons/collections/list.h>
 
 // Definimos algunas constantes para nuestro código
-#define IP " tp0.utnso.com"
+#define IP "tp0.utnso.com"
 #define PUERTO "8080"
 
 // Definimos algunas variables globales
