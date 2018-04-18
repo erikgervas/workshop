@@ -11,6 +11,8 @@ int main() {
   wait_confirmation(socket);
   exit_gracefully(0);
   close(socket);
+	
+	
 }
 
 void configure_logger() {
