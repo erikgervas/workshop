@@ -1,6 +1,7 @@
 #include "tp0.h"
 
 int main() {
+	//Jajasaludos
   configure_logger();
   int socket = connect_to_server(IP, PUERTO);
   wait_hello(socket);
