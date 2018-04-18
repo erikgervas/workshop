@@ -12,7 +12,9 @@ int main() {
   wait_confirmation(socket);
   exit_gracefully(0);
   close(socket);
+
   int a;
+
 }
 
 void configure_logger() {
